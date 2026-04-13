@@ -115,7 +115,8 @@ function restoreSession() {
 }
 
 function enterApp() {
-  document.getElementById('user-name').textContent = App.user.name;
+  const nameEl = document.getElementById('user-name');
+  if (nameEl) nameEl.textContent = App.user.name;
   showScreen('screen-home');
   loadMonthData();
 }
