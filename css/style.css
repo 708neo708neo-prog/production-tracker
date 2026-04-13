@@ -148,6 +148,14 @@ body {
   opacity: 0.8;
 }
 .btn-icon:hover { opacity: 1; }
+.btn-signout-text {
+  background: rgba(255,255,255,0.15); border: none;
+  color: var(--white); border-radius: 6px;
+  padding: 5px 10px; cursor: pointer;
+  font-size: 0.8rem; font-family: var(--font);
+  white-space: nowrap;
+}
+.btn-signout-text:hover { background: rgba(255,255,255,0.25); }
 .graph-actions { display: flex; gap: 4px; }
 .btn-icon-text {
   background: rgba(255,255,255,0.15); border: none;
