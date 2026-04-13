@@ -1,154 +1,80 @@
 // ===================================================
-// 生産反数管理アプリ - メインロジック
+// 生産反数管理アプリ v1.5 - Firebase版
 // ===================================================
 
 'use strict';
 
-// ---- アプリ状態 ----
+const DAY_NAMES = ['日', '月', '火', '水', '木', '金', '土'];
 
+// ---- アプリ状態 ----
 const App = {
-  user:         null,   // { email, name }
-  idToken:      null,   // Google IDトークン
+  user:         null,
   year:         new Date().getFullYear(),
   month:        new Date().getMonth() + 1,
-  monthData:    [],     // 当月の全データ
-  summary:      null,   // 月次サマリー
-  selectedDate: null,   // 入力画面の選択日 (YYYY-MM-DD)
-  miniChart:    null,   // ミニチャートインスタンス
-  mainChart:    null,   // メインチャートインスタンス
+  monthData:    [],
+  summary:      null,
+  selectedDate: null,
+  miniChart:    null,
+  mainChart:    null,
 };
 
-const DAY_NAMES = ['日', '月', '火', '水', '木', '金', '土'];
-const DAY_NAMES_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+let db, auth;
 
 // ---- 初期化 ----
-
 window.addEventListener('DOMContentLoaded', () => {
-  // CONFIG チェック
-  if (!window.CONFIG) {
-    showError('config.js が読み込まれていません。');
+  if (!window.CONFIG || !CONFIG.firebase || CONFIG.firebase.apiKey === 'YOUR_API_KEY') {
+    showAuthError('config.js のFirebase設定が未完了です。SETUP.md を参照してください。');
     return;
   }
 
-  // Google Sign-In ボタンを初期化（GIS ライブラリ読み込み後）
-  waitForGoogle(() => initGoogleSignIn());
+  try {
+    firebase.initializeApp(CONFIG.firebase);
+    auth = firebase.auth();
+    db   = firebase.firestore();
+  } catch (e) {
+    showAuthError('Firebase初期化エラー: ' + e.message);
+    return;
+  }
 
-  // イベントリスナー設定
+  // 認証状態監視
+  auth.onAuthStateChanged((user) => {
+    if (user) {
+      App.user = { email: user.email, name: user.displayName || user.email };
+      showScreen('screen-home');
+      loadMonthData();
+    } else {
+      showScreen('screen-auth');
+    }
+  });
+
   bindEvents();
-
-  // キャッシュ済みトークンがあれば復元
-  restoreSession();
 });
 
-function waitForGoogle(callback) {
-  if (window.google && google.accounts) {
-    callback();
-  } else {
-    setTimeout(() => waitForGoogle(callback), 100);
-  }
-}
-
-function initGoogleSignIn() {
-  google.accounts.id.initialize({
-    client_id: CONFIG.GOOGLE_CLIENT_ID,
-    callback:  onGoogleSignIn,
-    auto_select: false,
-    cancel_on_tap_outside: true,
-  });
-
-  google.accounts.id.renderButton(
-    document.getElementById('google-signin-btn'),
-    {
-      theme: 'outline',
-      size:  'large',
-      text:  'signin_with',
-      locale: 'ja',
-      width: 280,
-    }
-  );
-}
-
-// Google サインインコールバック（グローバル関数として宣言）
-window.onGoogleSignIn = function(response) {
-  if (!response.credential) {
-    showAuthError('サインインに失敗しました。');
-    return;
-  }
-
-  const token = response.credential;
-  const payload = decodeJWT(token);
-
-  if (!payload) {
-    showAuthError('トークンの解析に失敗しました。');
-    return;
-  }
-
-  App.idToken = token;
-  App.user = { email: payload.email, name: payload.name || payload.email };
-
-  // sessionStorage に保存
-  sessionStorage.setItem('idToken',    token);
-  sessionStorage.setItem('userEmail',  App.user.email);
-  sessionStorage.setItem('userName',   App.user.name);
-
-  enterApp();
-};
-
-function restoreSession() {
-  const token = sessionStorage.getItem('idToken');
-  if (!token) return;
-
-  // 有効期限チェック
-  const payload = decodeJWT(token);
-  if (!payload || Date.now() / 1000 > payload.exp - 120) {
-    sessionStorage.clear();
-    return;
-  }
-
-  App.idToken = token;
-  App.user = {
-    email: sessionStorage.getItem('userEmail'),
-    name:  sessionStorage.getItem('userName'),
-  };
-
-  enterApp();
-}
-
-function enterApp() {
-  const nameEl = document.getElementById('user-name');
-  if (nameEl) nameEl.textContent = App.user.name;
-  showScreen('screen-home');
-  loadMonthData();
-}
-
-// ---- イベントバインド ----
-
+// ---- イベント ----
 function bindEvents() {
+  // 認証
+  document.getElementById('btn-google-signin').addEventListener('click', signInWithGoogle);
+
   // ホーム
-  document.getElementById('btn-help').addEventListener('click', () => {
-    document.getElementById('help-modal').classList.remove('hidden');
-  });
-  document.getElementById('btn-close-help').addEventListener('click', () => {
-    document.getElementById('help-modal').classList.add('hidden');
-  });
+  document.getElementById('btn-help').addEventListener('click', () =>
+    document.getElementById('help-modal').classList.remove('hidden'));
+  document.getElementById('btn-close-help').addEventListener('click', () =>
+    document.getElementById('help-modal').classList.add('hidden'));
   document.getElementById('help-modal').addEventListener('click', (e) => {
-    if (e.target === document.getElementById('help-modal')) {
+    if (e.target === document.getElementById('help-modal'))
       document.getElementById('help-modal').classList.add('hidden');
-    }
   });
-  document.getElementById('btn-signout').addEventListener('click', signOut);
+  document.getElementById('btn-signout').addEventListener('click', signOutUser);
   document.getElementById('btn-prev-month').addEventListener('click', () => changeMonth(-1));
   document.getElementById('btn-next-month').addEventListener('click', () => changeMonth(+1));
-  document.getElementById('btn-today-input').addEventListener('click', () => {
-    const today = formatISO(new Date());
-    openInputScreen(today);
-  });
+  document.getElementById('btn-today-input').addEventListener('click', () =>
+    openInputScreen(formatISO(new Date())));
   document.getElementById('btn-view-graph').addEventListener('click', openGraphScreen);
 
   // 入力画面
   document.getElementById('btn-back-from-input').addEventListener('click', () => {
     showScreen('screen-home');
-    loadMonthData(); // データが変わった可能性があるのでリロード
+    loadMonthData();
   });
   document.getElementById('btn-prev-day').addEventListener('click', () => changeDay(-1));
   document.getElementById('btn-next-day').addEventListener('click', () => changeDay(+1));
@@ -162,57 +88,56 @@ function bindEvents() {
   document.getElementById('btn-delete').addEventListener('click', deleteEntry);
 
   // グラフ画面
-  document.getElementById('btn-back-from-graph').addEventListener('click', () => {
-    showScreen('screen-home');
-  });
+  document.getElementById('btn-back-from-graph').addEventListener('click', () =>
+    showScreen('screen-home'));
 
   // ダイアログ
-  document.getElementById('confirm-cancel').addEventListener('click', () => {
-    document.getElementById('confirm-dialog').classList.add('hidden');
-  });
+  document.getElementById('confirm-cancel').addEventListener('click', () =>
+    document.getElementById('confirm-dialog').classList.add('hidden'));
 }
 
-// ---- 画面遷移 ----
-
-function showScreen(id) {
-  document.querySelectorAll('.screen').forEach(s => {
-    s.classList.remove('active');
-    s.classList.add('hidden');
-  });
-  const target = document.getElementById(id);
-  target.classList.remove('hidden');
-  target.classList.add('active');
-  window.scrollTo(0, 0);
+// ---- 認証 ----
+async function signInWithGoogle() {
+  const btn = document.getElementById('btn-google-signin');
+  btn.disabled = true;
+  btn.textContent = 'サインイン中...';
+  try {
+    const provider = new firebase.auth.GoogleAuthProvider();
+    await auth.signInWithPopup(provider);
+    // onAuthStateChanged が自動で画面遷移する
+  } catch (err) {
+    showAuthError('サインインに失敗しました: ' + err.message);
+    btn.disabled = false;
+    btn.innerHTML = `<svg viewBox="0 0 24 24" width="20" height="20">
+      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+    </svg>Googleでサインイン`;
+  }
 }
 
-// ---- 月ナビゲーション ----
-
-function changeMonth(delta) {
-  App.month += delta;
-  if (App.month > 12) { App.month = 1;  App.year++; }
-  if (App.month < 1)  { App.month = 12; App.year--; }
-  loadMonthData();
+async function signOutUser() {
+  await auth.signOut();
+  App.monthData = [];
+  App.summary   = null;
 }
 
-function updateMonthLabel() {
-  document.getElementById('current-month-label').textContent =
-    `${App.year}年 ${App.month}月`;
-}
-
-// ---- データ読み込み ----
-
+// ---- データ取得（Firestore） ----
 async function loadMonthData() {
   updateMonthLabel();
   showLoading(true);
-
   try {
-    const result = await apiCall('getMonthData', { year: App.year, month: App.month });
-    if (!result.success) throw new Error(result.error);
-    App.monthData = result.data || [];
+    const yearMonth = fmtYearMonth(App.year, App.month);
+    const snapshot  = await db.collection('entries')
+      .where('yearMonth', '==', yearMonth)
+      .get();
 
-    const sumResult = await apiCall('getMonthlySummary', { year: App.year, month: App.month });
-    App.summary = sumResult.success ? sumResult.summary : null;
+    App.monthData = snapshot.docs
+      .map(d => d.data())
+      .sort((a, b) => a.isoDate.localeCompare(b.isoDate));
 
+    recalcSummary();
     updateSummaryDisplay();
     renderMiniChart();
     renderRecentEntries();
@@ -223,62 +148,284 @@ async function loadMonthData() {
   }
 }
 
-function updateSummaryDisplay() {
-  const s = App.summary;
-  if (s) {
-    document.getElementById('sum-total').textContent =
-      s.totalSeisan > 0 ? s.totalSeisan.toFixed(1) : '-';
-    document.getElementById('sum-daily').textContent =
-      s.dailyAvg > 0 ? s.dailyAvg.toFixed(2) : '-';
-    document.getElementById('sum-days').textContent =
-      s.activeDays > 0 ? s.activeDays : '-';
-  } else {
-    ['sum-total', 'sum-daily', 'sum-days'].forEach(id => {
-      document.getElementById(id).textContent = '-';
-    });
-  }
-}
+// ---- データ保存 ----
+async function saveEntry() {
+  const seisan = parseFloat(document.getElementById('input-seisan').value);
+  const bc     = parseFloat(document.getElementById('input-bc').value)   || 0;
+  const doji   = parseFloat(document.getElementById('input-doji').value) || 0;
 
-function renderRecentEntries() {
-  const list = document.getElementById('recent-list');
-  // 直近5件（生産データがある日）
-  const entries = App.monthData
-    .filter(d => d.seisan !== null && d.seisan > 0)
-    .sort((a, b) => b.isoDate.localeCompare(a.isoDate))
-    .slice(0, 5);
-
-  if (entries.length === 0) {
-    list.innerHTML = '<div class="recent-empty">データなし</div>';
+  if (isNaN(seisan) || seisan <= 0) {
+    showStatus('生産数を入力してください。', 'error');
     return;
   }
 
-  list.innerHTML = entries.map(d => {
-    const parts = d.isoDate.split('-');
-    const label = `${parseInt(parts[1])}/${parseInt(parts[2])}`;
-    return `
-      <div class="recent-item" onclick="openInputScreen('${d.isoDate}')">
-        <div class="recent-date">${label}</div>
-        <div class="recent-day">${d.dayOfWeek}</div>
-        <div class="recent-values">
-          生産 ${d.seisan} &nbsp;BC ${d.bc ?? '-'} &nbsp;胴継 ${d.doji ?? '-'}
-        </div>
-        <div class="recent-edit">編集</div>
-      </div>`;
-  }).join('');
+  const existing = App.monthData.find(d => d.isoDate === App.selectedDate);
+  if (existing) {
+    const ok = await confirm2('データを上書きします。よろしいですか？');
+    if (!ok) return;
+  }
+
+  showLoading(true);
+  document.getElementById('btn-save').disabled = true;
+
+  try {
+    const isoDate    = App.selectedDate;
+    const parts      = isoDate.split('-');
+    const yearMonth  = fmtYearMonth(parseInt(parts[0]), parseInt(parts[1]));
+    const date       = new Date(isoDate + 'T12:00:00');
+    const dayOfWeek  = DAY_NAMES[date.getDay()];
+    const displayDate = parseInt(parts[1]) + '/' + parseInt(parts[2]);
+
+    const seisanNum = seisan;
+    const bcNum     = bc;
+    const dojiNum   = doji;
+    const bcPct     = seisanNum > 0 ? r2(bcNum   / seisanNum * 100) : 0;
+    const dojiPct   = seisanNum > 0 ? r2(dojiNum / seisanNum * 100) : 0;
+
+    const entry = {
+      isoDate, displayDate, dayOfWeek, yearMonth,
+      seisan: seisanNum, bc: bcNum, bcPct, doji: dojiNum, dojiPct,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedBy: App.user.email,
+    };
+
+    await db.collection('entries').doc(isoDate).set(entry);
+
+    // ローカルキャッシュ更新
+    const idx = App.monthData.findIndex(d => d.isoDate === isoDate);
+    if (idx >= 0) App.monthData[idx] = entry;
+    else          App.monthData.push(entry);
+    App.monthData.sort((a, b) => a.isoDate.localeCompare(b.isoDate));
+
+    recalcSummary();
+    updateSummaryDisplay();
+    renderMiniChart();
+    renderRecentEntries();
+    loadEntryData(isoDate); // 削除ボタンの表示更新
+
+    showStatus('保存しました！', 'success');
+  } catch (err) {
+    showStatus('保存に失敗しました: ' + err.message, 'error');
+  } finally {
+    showLoading(false);
+    document.getElementById('btn-save').disabled = false;
+  }
 }
 
-// ---- ミニチャート ----
+// ---- データ削除 ----
+async function deleteEntry() {
+  const ok = await confirm2('このデータを削除します。よろしいですか？');
+  if (!ok) return;
+
+  showLoading(true);
+  try {
+    await db.collection('entries').doc(App.selectedDate).delete();
+
+    const idx = App.monthData.findIndex(d => d.isoDate === App.selectedDate);
+    if (idx >= 0) App.monthData.splice(idx, 1);
+
+    document.getElementById('input-seisan').value = '';
+    document.getElementById('input-bc').value     = '';
+    document.getElementById('input-doji').value   = '';
+    document.getElementById('pct-bc').textContent   = '-';
+    document.getElementById('pct-doji').textContent = '-';
+    document.getElementById('btn-delete').classList.add('hidden');
+
+    recalcSummary();
+    updateSummaryDisplay();
+    renderMiniChart();
+    renderRecentEntries();
+    showStatus('削除しました。', 'success');
+  } catch (err) {
+    showStatus('削除に失敗しました: ' + err.message, 'error');
+  } finally {
+    showLoading(false);
+  }
+}
+
+// ---- 月ナビ ----
+function changeMonth(delta) {
+  App.month += delta;
+  if (App.month > 12) { App.month = 1;  App.year++; }
+  if (App.month < 1)  { App.month = 12; App.year--; }
+  loadMonthData();
+}
+
+function updateMonthLabel() {
+  document.getElementById('current-month-label').textContent =
+    App.year + '年 ' + App.month + '月';
+}
+
+// ---- サマリー ----
+function recalcSummary() {
+  let totalSeisan = 0, totalBc = 0, totalDoji = 0, activeDays = 0;
+  for (const d of App.monthData) {
+    if (d.seisan > 0) {
+      totalSeisan += d.seisan;
+      totalBc     += d.bc   || 0;
+      totalDoji   += d.doji || 0;
+      activeDays++;
+    }
+  }
+  App.summary = {
+    totalSeisan:  r2(totalSeisan),
+    activeDays,
+    dailyAvg:     activeDays > 0 ? r2(totalSeisan / activeDays) : 0,
+    totalBc:      r2(totalBc),
+    totalBcPct:   totalSeisan > 0 ? r2(totalBc   / totalSeisan * 100) : 0,
+    totalDoji:    r2(totalDoji),
+    totalDojiPct: totalSeisan > 0 ? r2(totalDoji / totalSeisan * 100) : 0,
+  };
+  return App.summary;
+}
+
+function updateSummaryDisplay() {
+  const s = App.summary;
+  document.getElementById('sum-total').textContent =
+    s && s.totalSeisan > 0 ? s.totalSeisan.toFixed(1) : '-';
+  document.getElementById('sum-daily').textContent =
+    s && s.dailyAvg > 0 ? s.dailyAvg.toFixed(2) : '-';
+  document.getElementById('sum-days').textContent =
+    s && s.activeDays > 0 ? s.activeDays : '-';
+}
+
+// ---- 最近の入力 ----
+function renderRecentEntries() {
+  const list = document.getElementById('recent-list');
+  const entries = App.monthData
+    .filter(d => d.seisan > 0)
+    .sort((a, b) => b.isoDate.localeCompare(a.isoDate))
+    .slice(0, 5);
+
+  if (!entries.length) {
+    list.innerHTML = '<div class="recent-empty">データなし</div>';
+    return;
+  }
+  list.innerHTML = entries.map(d => `
+    <div class="recent-item" onclick="openInputScreen('${d.isoDate}')">
+      <div class="recent-date">${d.displayDate}</div>
+      <div class="recent-day">${d.dayOfWeek}</div>
+      <div class="recent-values">生産 ${d.seisan} &nbsp;BC ${d.bc ?? '-'} &nbsp;胴継 ${d.doji ?? '-'}</div>
+      <div class="recent-edit">編集</div>
+    </div>`).join('');
+}
+
+// ---- 入力画面 ----
+function openInputScreen(isoDate) {
+  setSelectedDate(isoDate);
+  showScreen('screen-input');
+  document.getElementById('input-seisan').focus();
+}
+
+window.showDatePicker = function() {
+  const picker = document.getElementById('date-picker-input');
+  picker.value = App.selectedDate;
+  if (picker.showPicker) picker.showPicker(); else picker.click();
+};
+
+function setSelectedDate(isoDate) {
+  App.selectedDate = isoDate;
+  const parts   = isoDate.split('-');
+  const date    = new Date(isoDate + 'T12:00:00');
+  const dayIdx  = date.getDay();
+  const dayName = DAY_NAMES[dayIdx];
+
+  document.getElementById('input-date-day').textContent =
+    parseInt(parts[1]) + '/' + parseInt(parts[2]);
+
+  let dayLabel = dayName + '曜日';
+  if (dayIdx === 0) dayLabel += ' <span class="sunday-badge">日曜</span>';
+  if (dayIdx === 6) dayLabel += ' <span class="saturday-badge">土曜</span>';
+  document.getElementById('input-date-weekday').innerHTML = dayLabel;
+
+  document.getElementById('input-header-title').textContent =
+    App.year + '年' + parseInt(parts[1]) + '月' + parseInt(parts[2]) + '日';
+
+  loadEntryData(isoDate);
+}
+
+function loadEntryData(isoDate) {
+  const existing = App.monthData.find(d => d.isoDate === isoDate);
+  const deleteBtn = document.getElementById('btn-delete');
+  document.getElementById('input-status').classList.add('hidden');
+
+  if (existing && existing.seisan > 0) {
+    document.getElementById('input-seisan').value = existing.seisan ?? '';
+    document.getElementById('input-bc').value     = existing.bc     ?? '';
+    document.getElementById('input-doji').value   = existing.doji   ?? '';
+    deleteBtn.classList.remove('hidden');
+  } else {
+    document.getElementById('input-seisan').value = '';
+    document.getElementById('input-bc').value     = '';
+    document.getElementById('input-doji').value   = '';
+    deleteBtn.classList.add('hidden');
+  }
+  updatePctDisplay();
+
+  const isSunday = new Date(isoDate + 'T12:00:00').getDay() === 0;
+  document.getElementById('btn-save').disabled = isSunday;
+  if (isSunday) showStatus('日曜日はデータ入力できません。', 'error');
+}
+
+function changeDay(delta) {
+  const date = new Date(App.selectedDate + 'T12:00:00');
+  date.setDate(date.getDate() + delta);
+  setSelectedDate(formatISO(date));
+}
+
+function updatePctDisplay() {
+  const seisan = parseFloat(document.getElementById('input-seisan').value) || 0;
+  const bc     = parseFloat(document.getElementById('input-bc').value)     || 0;
+  const doji   = parseFloat(document.getElementById('input-doji').value)   || 0;
+  document.getElementById('pct-bc').textContent =
+    seisan > 0 ? (bc / seisan * 100).toFixed(1) + '%' : '-';
+  document.getElementById('pct-doji').textContent =
+    seisan > 0 ? (doji / seisan * 100).toFixed(1) + '%' : '-';
+}
+
+function showStatus(msg, type) {
+  const el = document.getElementById('input-status');
+  el.textContent = msg;
+  el.className   = 'status-msg ' + type;
+  el.classList.remove('hidden');
+  if (type === 'success') setTimeout(() => el.classList.add('hidden'), 3000);
+}
+
+// ---- グラフ ----
+function openGraphScreen() {
+  showScreen('screen-graph');
+  renderMainChart();
+}
+
+function buildChartData() {
+  const daysInMonth = new Date(App.year, App.month, 0).getDate();
+  const dataMap     = {};
+  for (const d of App.monthData) dataMap[d.isoDate] = d;
+
+  const labels = [], seisanData = [], bcData = [], dojiData = [];
+  for (let day = 1; day <= daysInMonth; day++) {
+    const iso = App.year + '-' +
+      String(App.month).padStart(2,'0') + '-' +
+      String(day).padStart(2,'0');
+    labels.push(String(day));
+    const d = dataMap[iso];
+    if (d && d.seisan > 0) {
+      seisanData.push(d.seisan);
+      bcData.push(d.bc   || 0);
+      dojiData.push(d.doji || 0);
+    } else {
+      seisanData.push(null);
+      bcData.push(null);
+      dojiData.push(null);
+    }
+  }
+  return { labels, seisanData, bcData, dojiData };
+}
 
 function renderMiniChart() {
   const ctx = document.getElementById('mini-chart').getContext('2d');
-
-  if (App.miniChart) {
-    App.miniChart.destroy();
-    App.miniChart = null;
-  }
-
-  const { labels, seisanData, bcData, dojiData } = buildChartData(App.year, App.month, App.monthData);
-
+  if (App.miniChart) { App.miniChart.destroy(); App.miniChart = null; }
+  const { labels, seisanData, bcData, dojiData } = buildChartData();
   App.miniChart = new Chart(ctx, {
     type: 'bar',
     data: {
@@ -290,495 +437,118 @@ function renderMiniChart() {
       ],
     },
     options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: { enabled: false },
-      },
+      responsive: true, maintainAspectRatio: false, animation: false,
+      plugins: { legend: { display: false }, tooltip: { enabled: false } },
       scales: {
-        x: {
-          ticks: { display: false },
-          grid:  { display: false },
-        },
-        y: {
-          beginAtZero: true,
-          ticks: { font: { size: 9 }, maxTicksLimit: 4 },
-          grid: { color: '#f3f4f6' },
-        },
+        x: { ticks: { display: false }, grid: { display: false } },
+        y: { beginAtZero: true, ticks: { font: { size: 9 }, maxTicksLimit: 4 },
+             grid: { color: '#f3f4f6' } },
       },
     },
   });
 }
 
-// ---- 入力画面 ----
-
-function openInputScreen(isoDate) {
-  setSelectedDate(isoDate);
-  showScreen('screen-input');
-  document.getElementById('input-seisan').focus();
-}
-
-window.showDatePicker = function() {
-  const picker = document.getElementById('date-picker-input');
-  picker.value = App.selectedDate;
-  picker.showPicker ? picker.showPicker() : picker.click();
-};
-
-function setSelectedDate(isoDate) {
-  App.selectedDate = isoDate;
-  const date = new Date(isoDate + 'T12:00:00');
-  const parts = isoDate.split('-');
-  const label = `${App.year}年${parseInt(parts[1])}月${parseInt(parts[2])}日`;
-  const dayIdx = date.getDay();
-  const dayName = DAY_NAMES[dayIdx];
-
-  document.getElementById('input-date-day').textContent =
-    `${parseInt(parts[1])}/${parseInt(parts[2])}`;
-
-  let dayLabel = `${dayName}曜日`;
-  if (dayIdx === 0) dayLabel += ' <span class="sunday-badge">日曜</span>';
-  if (dayIdx === 6) dayLabel += ' <span class="saturday-badge">土曜</span>';
-  document.getElementById('input-date-weekday').innerHTML = dayLabel;
-
-  document.getElementById('input-header-title').textContent = label;
-
-  // 既存データを読み込む
-  loadEntryData(isoDate);
-}
-
-function loadEntryData(isoDate) {
-  // 入力フィールドをクリア
-  document.getElementById('input-seisan').value = '';
-  document.getElementById('input-bc').value = '';
-  document.getElementById('input-doji').value = '';
-  document.getElementById('pct-bc').textContent = '-';
-  document.getElementById('pct-doji').textContent = '-';
-  document.getElementById('input-status').classList.add('hidden');
-
-  const existing = App.monthData.find(d => d.isoDate === isoDate);
-  const deleteBtn = document.getElementById('btn-delete');
-
-  if (existing && existing.seisan !== null) {
-    document.getElementById('input-seisan').value = existing.seisan ?? '';
-    document.getElementById('input-bc').value     = existing.bc     ?? '';
-    document.getElementById('input-doji').value   = existing.doji   ?? '';
-    updatePctDisplay();
-    deleteBtn.classList.remove('hidden');
-  } else {
-    deleteBtn.classList.add('hidden');
-  }
-
-  // 日曜は入力不可
-  const date = new Date(isoDate + 'T12:00:00');
-  const isSunday = date.getDay() === 0;
-  document.getElementById('btn-save').disabled = isSunday;
-  if (isSunday) {
-    showStatus('日曜日はデータ入力できません。', 'error');
-  }
-}
-
-function changeDay(delta) {
-  if (!App.selectedDate) return;
-  const date = new Date(App.selectedDate + 'T12:00:00');
-  date.setDate(date.getDate() + delta);
-  setSelectedDate(formatISO(date));
-}
-
-function updatePctDisplay() {
-  const seisan = parseFloat(document.getElementById('input-seisan').value) || 0;
-  const bc     = parseFloat(document.getElementById('input-bc').value)     || 0;
-  const doji   = parseFloat(document.getElementById('input-doji').value)   || 0;
-
-  document.getElementById('pct-bc').textContent =
-    seisan > 0 ? (bc / seisan * 100).toFixed(1) + '%' : '-';
-  document.getElementById('pct-doji').textContent =
-    seisan > 0 ? (doji / seisan * 100).toFixed(1) + '%' : '-';
-}
-
-async function saveEntry() {
-  const seisan = parseFloat(document.getElementById('input-seisan').value);
-  const bc     = parseFloat(document.getElementById('input-bc').value)     || 0;
-  const doji   = parseFloat(document.getElementById('input-doji').value)   || 0;
-
-  if (isNaN(seisan) || seisan <= 0) {
-    showStatus('生産数を入力してください。', 'error');
-    return;
-  }
-
-  // 既存データがある場合は上書き確認
-  const existing = App.monthData.find(d => d.isoDate === App.selectedDate && d.seisan !== null);
-  if (existing) {
-    const ok = await confirm2('データを上書きします。よろしいですか？');
-    if (!ok) return;
-  }
-
-  showLoading(true);
-  document.getElementById('btn-save').disabled = true;
-
-  try {
-    const result = await apiCall('saveEntry', {
-      date:   App.selectedDate,
-      seisan, bc, doji,
-    });
-    if (!result.success) throw new Error(result.error);
-
-    // ローカルのキャッシュを更新
-    const idx = App.monthData.findIndex(d => d.isoDate === App.selectedDate);
-    const bcPct   = seisan > 0 ? Math.round(bc   / seisan * 10000) / 100 : 0;
-    const dojiPct = seisan > 0 ? Math.round(doji / seisan * 10000) / 100 : 0;
-    const date = new Date(App.selectedDate + 'T12:00:00');
-    const parts = App.selectedDate.split('-');
-
-    const newEntry = {
-      isoDate:     App.selectedDate,
-      displayDate: `${parseInt(parts[1])}/${parseInt(parts[2])}`,
-      dayOfWeek:   DAY_NAMES[date.getDay()],
-      seisan, bc, bcPct, doji, dojiPct,
-      weekSeisan: null, weekBc: null, weekBcPct: null, weekDoji: null, weekDojiPct: null,
-    };
-
-    if (idx >= 0) App.monthData[idx] = newEntry;
-    else          App.monthData.push(newEntry);
-
-    showStatus('保存しました！', 'success');
-    document.getElementById('btn-delete').classList.remove('hidden');
-
-    // サマリー再計算
-    recalcSummary();
-    renderMiniChart();
-    renderRecentEntries();
-    updateSummaryDisplay();
-
-  } catch (err) {
-    showStatus('保存に失敗しました: ' + err.message, 'error');
-    console.error(err);
-  } finally {
-    showLoading(false);
-    document.getElementById('btn-save').disabled = false;
-  }
-}
-
-async function deleteEntry() {
-  const ok = await confirm2('このデータを削除します。よろしいですか？');
-  if (!ok) return;
-
-  showLoading(true);
-  try {
-    const result = await apiCall('deleteEntry', { date: App.selectedDate });
-    if (!result.success) throw new Error(result.error);
-
-    // ローカルキャッシュ更新
-    const idx = App.monthData.findIndex(d => d.isoDate === App.selectedDate);
-    if (idx >= 0) {
-      App.monthData[idx].seisan = null;
-      App.monthData[idx].bc     = null;
-      App.monthData[idx].bcPct  = null;
-      App.monthData[idx].doji   = null;
-      App.monthData[idx].dojiPct = null;
-    }
-
-    document.getElementById('input-seisan').value = '';
-    document.getElementById('input-bc').value = '';
-    document.getElementById('input-doji').value = '';
-    document.getElementById('pct-bc').textContent = '-';
-    document.getElementById('pct-doji').textContent = '-';
-    document.getElementById('btn-delete').classList.add('hidden');
-
-    showStatus('削除しました。', 'success');
-    recalcSummary();
-    renderMiniChart();
-    renderRecentEntries();
-    updateSummaryDisplay();
-
-  } catch (err) {
-    showStatus('削除に失敗しました: ' + err.message, 'error');
-  } finally {
-    showLoading(false);
-  }
-}
-
-function showStatus(msg, type) {
-  const el = document.getElementById('input-status');
-  el.textContent = msg;
-  el.className = 'status-msg ' + type;
-  el.classList.remove('hidden');
-
-  if (type === 'success') {
-    setTimeout(() => el.classList.add('hidden'), 3000);
-  }
-}
-
-// ---- グラフ画面 ----
-
-function openGraphScreen() {
-  showScreen('screen-graph');
-  renderMainChart();
-}
-
 function renderMainChart() {
   const ctx = document.getElementById('main-chart').getContext('2d');
-
-  if (App.mainChart) {
-    App.mainChart.destroy();
-    App.mainChart = null;
-  }
-
-  const { labels, seisanData, bcData, dojiData } = buildChartData(App.year, App.month, App.monthData);
-
-  // タイトル・サブタイトル
-  document.getElementById('graph-title').textContent =
-    `${App.year}年 ${App.month}月 生産反数`;
-
+  if (App.mainChart) { App.mainChart.destroy(); App.mainChart = null; }
+  const { labels, seisanData, bcData, dojiData } = buildChartData();
   const s = App.summary || recalcSummary();
-  const totalStr = s && s.totalSeisan > 0 ? s.totalSeisan.toFixed(1) : '0.0';
-  const avgStr   = s && s.dailyAvg   > 0 ? s.dailyAvg.toFixed(2)   : '0.00';
-  const daysStr  = s && s.activeDays  > 0 ? s.activeDays             : '0';
-  document.getElementById('graph-subtitle').textContent =
-    `生産 ${totalStr}反　日産 ${avgStr}反/${daysStr}日`;
 
-  // 印刷用サマリーテーブル
-  if (s) {
-    document.getElementById('pt-total').textContent  = s.totalSeisan.toFixed(1) + '反';
-    document.getElementById('pt-days').textContent   = s.activeDays + '日';
-    document.getElementById('pt-daily').textContent  = s.dailyAvg.toFixed(2) + '反/日';
-    document.getElementById('pt-bc-pct').textContent = s.totalBcPct.toFixed(2) + '%';
-    document.getElementById('pt-doji-pct').textContent = s.totalDojiPct.toFixed(2) + '%';
-  }
+  document.getElementById('graph-title').textContent =
+    App.year + '年 ' + App.month + '月 生産反数';
+  document.getElementById('graph-subtitle').textContent =
+    '生産 ' + (s.totalSeisan || 0).toFixed(1) + '反　日産 ' +
+    (s.dailyAvg || 0).toFixed(2) + '反/' + (s.activeDays || 0) + '日';
+
+  document.getElementById('pt-total').textContent    = (s.totalSeisan || 0).toFixed(1) + '反';
+  document.getElementById('pt-days').textContent     = (s.activeDays  || 0) + '日';
+  document.getElementById('pt-daily').textContent    = (s.dailyAvg    || 0).toFixed(2) + '反/日';
+  document.getElementById('pt-bc-pct').textContent   = (s.totalBcPct  || 0).toFixed(2) + '%';
+  document.getElementById('pt-doji-pct').textContent = (s.totalDojiPct|| 0).toFixed(2) + '%';
 
   App.mainChart = new Chart(ctx, {
     type: 'bar',
     data: {
       labels,
       datasets: [
-        {
-          label: '生産数',
-          data: seisanData,
-          backgroundColor: '#4472C4',
-          borderWidth: 0,
-          barPercentage: 0.75,
-        },
-        {
-          label: 'B.C反',
-          data: bcData,
-          backgroundColor: '#FFC000',
-          borderWidth: 0,
-          barPercentage: 0.75,
-        },
-        {
-          label: '胴継反',
-          data: dojiData,
-          backgroundColor: '#ED7D31',
-          borderWidth: 0,
-          barPercentage: 0.75,
-        },
+        { label: '生産数', data: seisanData, backgroundColor: '#4472C4', borderWidth: 0, barPercentage: 0.75 },
+        { label: 'B.C反',  data: bcData,     backgroundColor: '#FFC000', borderWidth: 0, barPercentage: 0.75 },
+        { label: '胴継反', data: dojiData,   backgroundColor: '#ED7D31', borderWidth: 0, barPercentage: 0.75 },
       ],
     },
     options: {
-      responsive: true,
-      maintainAspectRatio: false,
+      responsive: true, maintainAspectRatio: false,
       plugins: {
-        legend: {
-          position: 'bottom',
-          labels: { font: { size: 12 }, padding: 16, usePointStyle: true },
-        },
+        legend: { position: 'bottom', labels: { font: { size: 12 }, padding: 16, usePointStyle: true } },
         tooltip: {
           callbacks: {
-            title: (items) => `${App.month}/${items[0].label}`,
-            label: (item) => ` ${item.dataset.label}: ${item.raw}`,
+            title: (items) => App.month + '/' + items[0].label,
+            label: (item)  => ' ' + item.dataset.label + ': ' + item.raw,
           },
         },
       },
       scales: {
-        x: {
-          grid: { display: false },
-          ticks: {
-            font: { size: 10 },
-            color: (ctx) => {
-              // 日曜日はラベルを赤に
-              const day = new Date(App.year, App.month - 1, parseInt(ctx.tick.label)).getDay();
-              return day === 0 ? '#ef4444' : '#4b5563';
-            },
-          },
-        },
-        y: {
-          beginAtZero: true,
-          grid: { color: '#e5e7eb' },
-          ticks: { font: { size: 11 } },
-        },
+        x: { grid: { display: false }, ticks: { font: { size: 10 } } },
+        y: { beginAtZero: true, grid: { color: '#e5e7eb' }, ticks: { font: { size: 11 } } },
       },
     },
   });
 }
 
-// ---- チャートデータ生成 ----
-
-function buildChartData(year, month, monthData) {
-  const daysInMonth = new Date(year, month, 0).getDate();
-  const labels     = [];
-  const seisanData = [];
-  const bcData     = [];
-  const dojiData   = [];
-
-  // データをisoDateでマップ化
-  const dataMap = {};
-  for (const d of monthData) {
-    if (d.seisan !== null) dataMap[d.isoDate] = d;
-  }
-
-  for (let day = 1; day <= daysInMonth; day++) {
-    const isoDate = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
-    labels.push(String(day));
-
-    if (dataMap[isoDate] && dataMap[isoDate].seisan > 0) {
-      seisanData.push(dataMap[isoDate].seisan);
-      bcData.push(dataMap[isoDate].bc   ?? 0);
-      dojiData.push(dataMap[isoDate].doji ?? 0);
-    } else {
-      seisanData.push(null);
-      bcData.push(null);
-      dojiData.push(null);
-    }
-  }
-
-  return { labels, seisanData, bcData, dojiData };
-}
-
 // ---- 印刷・PDF ----
-
-window.printGraph = function() {
-  window.print();
+window.printGraph = function() { window.print(); };
+window.saveAsPDF  = function() {
+  const n = document.createElement('div');
+  n.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#1f2937;color:#fff;padding:10px 20px;border-radius:8px;font-size:.9rem;z-index:9999;';
+  n.textContent = '印刷ダイアログで「PDFに保存」を選択してください';
+  document.body.appendChild(n);
+  setTimeout(() => { document.body.removeChild(n); window.print(); }, 800);
 };
 
-window.saveAsPDF = function() {
-  const notice = document.createElement('div');
-  notice.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#1f2937;color:#fff;padding:10px 20px;border-radius:8px;font-size:0.9rem;z-index:9999;';
-  notice.textContent = '印刷ダイアログで「PDFに保存」を選択してください';
-  document.body.appendChild(notice);
-  setTimeout(() => {
-    document.body.removeChild(notice);
-    window.print();
-  }, 800);
-};
-
-// ---- API ----
-
-async function apiCall(action, params = {}) {
-  if (!App.idToken) throw new Error('Not authenticated');
-
-  // トークン期限チェック
-  const payload = decodeJWT(App.idToken);
-  if (payload && Date.now() / 1000 > payload.exp - 120) {
-    // 再認証が必要
-    sessionStorage.clear();
-    showScreen('screen-auth');
-    throw new Error('Token expired. Please sign in again.');
-  }
-
-  const res = await fetch(CONFIG.GAS_URL, {
-    method:  'POST',
-    headers: { 'Content-Type': 'text/plain' },
-    body:    JSON.stringify({ action, token: App.idToken, ...params }),
+// ---- 画面遷移 ----
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => {
+    s.classList.remove('active'); s.classList.add('hidden');
   });
-
-  if (!res.ok) throw new Error('HTTP ' + res.status);
-  return res.json();
-}
-
-// ---- 月次サマリー再計算（ローカル） ----
-
-function recalcSummary() {
-  let totalSeisan = 0, totalBc = 0, totalDoji = 0, activeDays = 0;
-  for (const d of App.monthData) {
-    if (d.seisan !== null && d.seisan > 0) {
-      totalSeisan += d.seisan;
-      totalBc     += d.bc   || 0;
-      totalDoji   += d.doji || 0;
-      activeDays++;
-    }
-  }
-  const dailyAvg    = activeDays > 0 ? Math.round(totalSeisan / activeDays * 100) / 100 : 0;
-  const totalBcPct  = totalSeisan > 0 ? Math.round(totalBc   / totalSeisan * 10000) / 100 : 0;
-  const totalDojiPct = totalSeisan > 0 ? Math.round(totalDoji / totalSeisan * 10000) / 100 : 0;
-
-  App.summary = {
-    year: App.year, month: App.month,
-    totalSeisan: Math.round(totalSeisan * 10) / 10,
-    activeDays, dailyAvg,
-    totalBc:     Math.round(totalBc   * 10) / 10,
-    totalBcPct,
-    totalDoji:   Math.round(totalDoji * 10) / 10,
-    totalDojiPct,
-  };
-  return App.summary;
-}
-
-// ---- サインアウト ----
-
-function signOut() {
-  if (window.google && google.accounts) {
-    google.accounts.id.disableAutoSelect();
-  }
-  App.user     = null;
-  App.idToken  = null;
-  App.monthData = [];
-  App.summary   = null;
-  sessionStorage.clear();
-  showScreen('screen-auth');
+  const t = document.getElementById(id);
+  t.classList.remove('hidden'); t.classList.add('active');
+  window.scrollTo(0, 0);
 }
 
 // ---- ユーティリティ ----
-
 function showLoading(show) {
   document.getElementById('loading-overlay').classList.toggle('hidden', !show);
 }
-
 function showAuthError(msg) {
   const el = document.getElementById('auth-error');
   el.textContent = msg;
   el.classList.remove('hidden');
 }
-
-function showError(msg) {
-  alert(msg);
-}
-
 function formatISO(date) {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+  return date.getFullYear() + '-' +
+    String(date.getMonth() + 1).padStart(2,'0') + '-' +
+    String(date.getDate()).padStart(2,'0');
 }
-
-function decodeJWT(token) {
-  try {
-    const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-    return JSON.parse(atob(b64));
-  } catch (e) {
-    return null;
-  }
+function fmtYearMonth(y, m) {
+  return y + '-' + String(m).padStart(2,'0');
 }
+function r2(n) { return Math.round(n * 100) / 100; }
 
-// Promise ベースの確認ダイアログ
 function confirm2(message) {
   return new Promise(resolve => {
     document.getElementById('confirm-message').textContent = message;
     const dialog = document.getElementById('confirm-dialog');
     dialog.classList.remove('hidden');
-
-    const okBtn     = document.getElementById('confirm-ok');
-    const cancelBtn = document.getElementById('confirm-cancel');
-
+    const ok     = document.getElementById('confirm-ok');
+    const cancel = document.getElementById('confirm-cancel');
     function cleanup() {
       dialog.classList.add('hidden');
-      okBtn.removeEventListener('click', onOk);
-      cancelBtn.removeEventListener('click', onCancel);
+      ok.removeEventListener('click', onOk);
+      cancel.removeEventListener('click', onCancel);
     }
     function onOk()     { cleanup(); resolve(true);  }
     function onCancel() { cleanup(); resolve(false); }
-
-    okBtn.addEventListener('click', onOk);
-    cancelBtn.addEventListener('click', onCancel);
+    ok.addEventListener('click', onOk);
+    cancel.addEventListener('click', onCancel);
   });
 }

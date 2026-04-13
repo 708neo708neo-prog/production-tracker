@@ -5,13 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="theme-color" content="#1a56a0">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <title>生産反数管理 v1.4</title>
+  <title>生産反数管理 v1.5</title>
   <link rel="stylesheet" href="css/style.css">
-  <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-  <!-- Google Identity Services -->
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 </head>
 <body>
 
@@ -20,12 +20,20 @@
   <div class="auth-container">
     <div class="auth-logo">
       <div class="auth-icon">🧵</div>
-      <h1>生産反数管理 v1.4</h1>
+      <h1>生産反数管理 v1.5</h1>
       <p>日次生産データの入力・管理システム</p>
     </div>
     <div class="auth-card">
       <p>Googleアカウントでサインインしてください</p>
-      <div id="google-signin-btn"></div>
+      <button id="btn-google-signin" class="btn-google">
+        <svg viewBox="0 0 24 24" width="20" height="20">
+          <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+        </svg>
+        Googleでサインイン
+      </button>
       <div id="auth-error" class="error-msg hidden"></div>
     </div>
   </div>
@@ -34,23 +42,20 @@
 <!-- ===== ホーム画面 ===== -->
 <div id="screen-home" class="screen hidden">
   <header class="app-header">
-    <div class="header-title">生産反数管理 v1.4</div>
+    <div class="header-title">生産反数管理 v1.5</div>
     <div class="header-user">
-      <button id="btn-help" class="btn-signout-text" title="使い方">？ 使い方</button>
-      <button id="btn-signout" class="btn-signout-text" title="サインアウト">ログアウト</button>
+      <button id="btn-help" class="btn-signout-text">？ 使い方</button>
+      <button id="btn-signout" class="btn-signout-text">ログアウト</button>
     </div>
   </header>
 
   <main class="home-main">
-
-    <!-- 月ナビゲーション -->
     <div class="month-nav card">
       <button id="btn-prev-month" class="btn-month-nav">&#8249;</button>
       <div class="month-display" id="current-month-label">----年 -月</div>
       <button id="btn-next-month" class="btn-month-nav">&#8250;</button>
     </div>
 
-    <!-- 月次サマリー -->
     <div class="summary-card card">
       <div class="summary-item">
         <div class="summary-label">月間生産</div>
@@ -71,7 +76,6 @@
       </div>
     </div>
 
-    <!-- アクションボタン -->
     <div class="action-buttons">
       <button id="btn-today-input" class="btn-action btn-primary">
         <span class="btn-icon-lg">✏️</span>
@@ -83,7 +87,6 @@
       </button>
     </div>
 
-    <!-- ミニチャートプレビュー -->
     <div class="mini-chart card">
       <div class="card-title">月次概要グラフ</div>
       <div class="chart-container-mini">
@@ -91,14 +94,10 @@
       </div>
     </div>
 
-    <!-- 最近の入力一覧 -->
     <div class="recent-entries card">
       <div class="card-title">最近の入力データ</div>
-      <div id="recent-list">
-        <div class="recent-empty">読み込み中...</div>
-      </div>
+      <div id="recent-list"><div class="recent-empty">読み込み中...</div></div>
     </div>
-
   </main>
 </div>
 
@@ -111,8 +110,6 @@
   </header>
 
   <main class="input-main">
-
-    <!-- 日付セレクタ -->
     <div class="date-selector card">
       <button id="btn-prev-day" class="btn-day-nav">&#8249;</button>
       <div class="date-display" onclick="showDatePicker()">
@@ -122,66 +119,38 @@
       <button id="btn-next-day" class="btn-day-nav">&#8250;</button>
     </div>
 
-    <!-- ネイティブ日付ピッカー（非表示） -->
     <input type="date" id="date-picker-input" class="hidden-date-input">
 
-    <!-- 入力フォーム -->
     <div class="input-form card">
       <div class="form-group">
         <label class="form-label" for="input-seisan">生産数</label>
-        <input
-          type="number"
-          id="input-seisan"
-          class="form-input"
-          placeholder="例: 68.5"
-          step="0.1"
-          min="0"
-          inputmode="decimal"
-          autocomplete="off">
+        <input type="number" id="input-seisan" class="form-input"
+               placeholder="例: 68.5" step="0.1" min="0" inputmode="decimal" autocomplete="off">
       </div>
-
       <div class="form-group">
         <label class="form-label" for="input-bc">B.C反</label>
         <div class="input-with-pct">
-          <input
-            type="number"
-            id="input-bc"
-            class="form-input"
-            placeholder="例: 0.9"
-            step="0.1"
-            min="0"
-            inputmode="decimal"
-            autocomplete="off">
+          <input type="number" id="input-bc" class="form-input"
+                 placeholder="例: 0.9" step="0.1" min="0" inputmode="decimal" autocomplete="off">
           <div class="pct-display" id="pct-bc">-</div>
         </div>
       </div>
-
       <div class="form-group">
         <label class="form-label" for="input-doji">胴継反</label>
         <div class="input-with-pct">
-          <input
-            type="number"
-            id="input-doji"
-            class="form-input"
-            placeholder="例: 6.5"
-            step="0.1"
-            min="0"
-            inputmode="decimal"
-            autocomplete="off">
+          <input type="number" id="input-doji" class="form-input"
+                 placeholder="例: 6.5" step="0.1" min="0" inputmode="decimal" autocomplete="off">
           <div class="pct-display" id="pct-doji">-</div>
         </div>
       </div>
     </div>
 
-    <!-- ステータスメッセージ -->
     <div id="input-status" class="status-msg hidden"></div>
 
-    <!-- 保存・削除ボタン -->
     <div class="input-actions">
       <button id="btn-save" class="btn-save">保存</button>
       <button id="btn-delete" class="btn-delete hidden">このデータを削除</button>
     </div>
-
   </main>
 </div>
 
@@ -197,38 +166,24 @@
   </header>
 
   <main class="graph-main" id="graph-print-area">
-
-    <!-- タイトル -->
     <div class="graph-title-section">
       <h2 class="graph-title" id="graph-title">----年 -月 生産反数</h2>
       <p class="graph-subtitle" id="graph-subtitle"></p>
     </div>
-
-    <!-- メインチャート -->
     <div class="chart-container">
       <canvas id="main-chart"></canvas>
     </div>
-
-    <!-- 印刷時のサマリーテーブル -->
     <div class="graph-summary-table print-only">
-      <table id="print-summary-table">
+      <table>
         <tr>
-          <th>月間生産反数</th>
-          <th>稼働日数</th>
-          <th>日産</th>
-          <th>B.C反%</th>
-          <th>胴継反%</th>
+          <th>月間生産反数</th><th>稼働日数</th><th>日産</th><th>B.C反%</th><th>胴継反%</th>
         </tr>
         <tr>
-          <td id="pt-total">-</td>
-          <td id="pt-days">-</td>
-          <td id="pt-daily">-</td>
-          <td id="pt-bc-pct">-</td>
-          <td id="pt-doji-pct">-</td>
+          <td id="pt-total">-</td><td id="pt-days">-</td><td id="pt-daily">-</td>
+          <td id="pt-bc-pct">-</td><td id="pt-doji-pct">-</td>
         </tr>
       </table>
     </div>
-
   </main>
 </div>
 
@@ -240,7 +195,6 @@
       <button id="btn-close-help" class="btn-close-help">✕</button>
     </div>
     <div class="help-body">
-
       <div class="help-section">
         <div class="help-section-title">📝 データの入力方法</div>
         <ol class="help-list">
@@ -251,17 +205,15 @@
           <li><strong>「保存」</strong> をタップして完了</li>
         </ol>
       </div>
-
       <div class="help-section">
         <div class="help-section-title">📅 過去データの修正</div>
         <ol class="help-list">
-          <li>「今日の入力」画面で <strong>「‹」「›」</strong> をタップして日付を変更</li>
+          <li>入力画面で <strong>「‹」「›」</strong> をタップして日付を変更</li>
           <li>または日付部分をタップしてカレンダーから選択</li>
           <li>既存データがある日は自動で読み込まれます</li>
           <li>修正して「保存」すると上書き確認が表示されます</li>
         </ol>
       </div>
-
       <div class="help-section">
         <div class="help-section-title">📊 グラフの見方</div>
         <ul class="help-list">
@@ -269,35 +221,30 @@
           <li><span class="legend-dot yellow"></span> <strong>黄：B.C反</strong></li>
           <li><span class="legend-dot orange"></span> <strong>橙：胴継反</strong></li>
           <li>データなし（土日・祝日等）はバーが表示されません</li>
-          <li>上部のサブタイトルに月計・日産が表示されます</li>
         </ul>
       </div>
-
       <div class="help-section">
         <div class="help-section-title">🖨️ 印刷・PDF保存</div>
         <ol class="help-list">
-          <li>ホーム画面の <strong>「月次グラフ」</strong> をタップ</li>
-          <li>右上の <strong>🖨️ ボタン</strong> で印刷ダイアログが開きます</li>
-          <li>PDFで保存する場合は印刷先で <strong>「PDFに保存」</strong> を選択</li>
-          <li>印刷は横向き（A4ランドスケープ）で最適化されています</li>
+          <li>「月次グラフ」をタップ</li>
+          <li>右上の <strong>🖨️</strong> で印刷ダイアログが開きます</li>
+          <li>PDFで保存するには印刷先で <strong>「PDFに保存」</strong> を選択</li>
+          <li>印刷は横向き（A4ランドスケープ）で最適化済みです</li>
         </ol>
       </div>
-
       <div class="help-section">
         <div class="help-section-title">⚠️ 注意事項</div>
         <ul class="help-list">
           <li>日曜日はデータ入力できません</li>
-          <li>データはGoogleスプレッドシートに保存されます</li>
           <li>週集計は月〜土の合計が自動計算されます</li>
-          <li>月が変わると新しいシートが自動作成されます</li>
+          <li>データはFirebaseに保存されます（全スタッフ共有）</li>
         </ul>
       </div>
-
     </div>
   </div>
 </div>
 
-<!-- ===== ローディングオーバーレイ ===== -->
+<!-- ===== ローディング ===== -->
 <div id="loading-overlay" class="loading-overlay hidden">
   <div class="loading-spinner"></div>
   <div class="loading-text">処理中...</div>
@@ -306,7 +253,7 @@
 <!-- ===== 確認ダイアログ ===== -->
 <div id="confirm-dialog" class="dialog-overlay hidden">
   <div class="dialog">
-    <p id="confirm-message">確認メッセージ</p>
+    <p id="confirm-message"></p>
     <div class="dialog-buttons">
       <button id="confirm-cancel" class="btn-dialog-cancel">キャンセル</button>
       <button id="confirm-ok" class="btn-dialog-ok">OK</button>
