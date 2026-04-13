@@ -124,6 +124,17 @@ function enterApp() {
 
 function bindEvents() {
   // ホーム
+  document.getElementById('btn-help').addEventListener('click', () => {
+    document.getElementById('help-modal').classList.remove('hidden');
+  });
+  document.getElementById('btn-close-help').addEventListener('click', () => {
+    document.getElementById('help-modal').classList.add('hidden');
+  });
+  document.getElementById('help-modal').addEventListener('click', (e) => {
+    if (e.target === document.getElementById('help-modal')) {
+      document.getElementById('help-modal').classList.add('hidden');
+    }
+  });
   document.getElementById('btn-signout').addEventListener('click', signOut);
   document.getElementById('btn-prev-month').addEventListener('click', () => changeMonth(-1));
   document.getElementById('btn-next-month').addEventListener('click', () => changeMonth(+1));

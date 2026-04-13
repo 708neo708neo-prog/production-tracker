@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#1a56a0">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <title>生産反数管理 v1.2</title>
+  <title>生産反数管理 v1.3</title>
   <link rel="stylesheet" href="css/style.css">
   <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
@@ -20,7 +20,7 @@
   <div class="auth-container">
     <div class="auth-logo">
       <div class="auth-icon">🧵</div>
-      <h1>生産反数管理 v1.2</h1>
+      <h1>生産反数管理 v1.3</h1>
       <p>日次生産データの入力・管理システム</p>
     </div>
     <div class="auth-card">
@@ -34,9 +34,9 @@
 <!-- ===== ホーム画面 ===== -->
 <div id="screen-home" class="screen hidden">
   <header class="app-header">
-    <div class="header-title">生産反数管理 v1.2</div>
+    <div class="header-title">生産反数管理 v1.3</div>
     <div class="header-user">
-      <span id="user-name"></span>
+      <button id="btn-help" class="btn-signout-text" title="使い方">？ 使い方</button>
       <button id="btn-signout" class="btn-signout-text" title="サインアウト">ログアウト</button>
     </div>
   </header>
@@ -230,6 +230,71 @@
     </div>
 
   </main>
+</div>
+
+<!-- ===== ヘルプモーダル ===== -->
+<div id="help-modal" class="dialog-overlay hidden">
+  <div class="dialog help-dialog">
+    <div class="help-header">
+      <h2>使い方ガイド</h2>
+      <button id="btn-close-help" class="btn-close-help">✕</button>
+    </div>
+    <div class="help-body">
+
+      <div class="help-section">
+        <div class="help-section-title">📝 データの入力方法</div>
+        <ol class="help-list">
+          <li>ホーム画面の <strong>「今日の入力」</strong> をタップ</li>
+          <li>日付が自動でセットされます（変更も可能）</li>
+          <li><strong>生産数・B.C反・胴継反</strong> を入力</li>
+          <li>B.C反%・胴継反%はリアルタイムで自動計算されます</li>
+          <li><strong>「保存」</strong> をタップして完了</li>
+        </ol>
+      </div>
+
+      <div class="help-section">
+        <div class="help-section-title">📅 過去データの修正</div>
+        <ol class="help-list">
+          <li>「今日の入力」画面で <strong>「‹」「›」</strong> をタップして日付を変更</li>
+          <li>または日付部分をタップしてカレンダーから選択</li>
+          <li>既存データがある日は自動で読み込まれます</li>
+          <li>修正して「保存」すると上書き確認が表示されます</li>
+        </ol>
+      </div>
+
+      <div class="help-section">
+        <div class="help-section-title">📊 グラフの見方</div>
+        <ul class="help-list">
+          <li><span class="legend-dot blue"></span> <strong>青：生産数</strong></li>
+          <li><span class="legend-dot yellow"></span> <strong>黄：B.C反</strong></li>
+          <li><span class="legend-dot orange"></span> <strong>橙：胴継反</strong></li>
+          <li>データなし（土日・祝日等）はバーが表示されません</li>
+          <li>上部のサブタイトルに月計・日産が表示されます</li>
+        </ul>
+      </div>
+
+      <div class="help-section">
+        <div class="help-section-title">🖨️ 印刷・PDF保存</div>
+        <ol class="help-list">
+          <li>ホーム画面の <strong>「月次グラフ」</strong> をタップ</li>
+          <li>右上の <strong>🖨️ ボタン</strong> で印刷ダイアログが開きます</li>
+          <li>PDFで保存する場合は印刷先で <strong>「PDFに保存」</strong> を選択</li>
+          <li>印刷は横向き（A4ランドスケープ）で最適化されています</li>
+        </ol>
+      </div>
+
+      <div class="help-section">
+        <div class="help-section-title">⚠️ 注意事項</div>
+        <ul class="help-list">
+          <li>日曜日はデータ入力できません</li>
+          <li>データはGoogleスプレッドシートに保存されます</li>
+          <li>週集計は月〜土の合計が自動計算されます</li>
+          <li>月が変わると新しいシートが自動作成されます</li>
+        </ul>
+      </div>
+
+    </div>
+  </div>
 </div>
 
 <!-- ===== ローディングオーバーレイ ===== -->
