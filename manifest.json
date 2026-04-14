@@ -1,0 +1,18 @@
+{
+  "name": "生産反数管理",
+  "short_name": "生産反数",
+  "description": "日次生産データの入力・管理システム",
+  "start_url": "/production-tracker/",
+  "display": "standalone",
+  "background_color": "#1a56a0",
+  "theme_color": "#1a56a0",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
