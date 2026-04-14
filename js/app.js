@@ -458,7 +458,9 @@ function renderMainChart() {
     App.year + '年 ' + App.month + '月 生産反数';
   document.getElementById('graph-subtitle').textContent =
     '生産 ' + (s.totalSeisan || 0).toFixed(1) + '反　日産 ' +
-    (s.dailyAvg || 0).toFixed(2) + '反/' + (s.activeDays || 0) + '日';
+    (s.dailyAvg || 0).toFixed(2) + '反/' + (s.activeDays || 0) + '日　' +
+    'BC ' + (s.totalBc || 0).toFixed(1) + '反(' + (s.totalBcPct || 0).toFixed(2) + '%)　' +
+    '胴継 ' + (s.totalDoji || 0).toFixed(1) + '反(' + (s.totalDojiPct || 0).toFixed(2) + '%)';
 
   document.getElementById('pt-total').textContent    = (s.totalSeisan || 0).toFixed(1) + '反';
   document.getElementById('pt-days').textContent     = (s.activeDays  || 0) + '日';
