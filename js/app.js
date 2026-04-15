@@ -509,123 +509,176 @@ function renderMainChart() {
 }
 
 // ---- 週次集計 ----
-function openWeeklyScreen() {
+async function openWeeklyScreen() {
   showScreen('screen-weekly');
   document.getElementById('weekly-month-label').textContent =
     App.year + '年 ' + App.month + '月';
-  renderWeeklyTable();
+  await loadAndRenderWeekly();
 }
 
-function calcWeeks() {
-  // その月の全日付を生成し、月〜土でグループ化
-  const daysInMonth = new Date(App.year, App.month, 0).getDate();
-  const dataMap = {};
-  for (const d of App.monthData) dataMap[d.isoDate] = d;
-
-  const weeks = [];
-  let weekIdx = -1;
-  let prevMonday = null;
-
-  for (let day = 1; day <= daysInMonth; day++) {
-    const iso  = App.year + '-' + String(App.month).padStart(2,'0') + '-' + String(day).padStart(2,'0');
-    const date = new Date(iso + 'T12:00:00');
-    const dow  = date.getDay(); // 0=日,1=月,...,6=土
-
-    // 月曜日（または月初）で新しい週を開始
-    if (dow === 1 || (day === 1 && dow !== 0)) {
-      weeks.push({ monday: iso, saturday: null, days: [] });
-      weekIdx = weeks.length - 1;
-    }
-
-    // 日曜はスキップ（集計対象外）
-    if (dow === 0) continue;
-
-    // 土曜日なら週末を記録
-    if (dow === 6 && weekIdx >= 0) {
-      weeks[weekIdx].saturday = iso;
-    }
-
-    // データがある日だけ追加
-    if (dataMap[iso] && dataMap[iso].seisan > 0) {
-      if (weekIdx < 0) { weeks.push({ monday: iso, saturday: null, days: [] }); weekIdx = 0; }
-      weeks[weekIdx].days.push(dataMap[iso]);
-    }
-  }
-
-  return weeks;
-}
-
-function renderWeeklyTable() {
-  document.getElementById('weekly-month-label').textContent =
-    App.year + '年 ' + App.month + '月';
-
+async function loadAndRenderWeekly() {
   const tbody = document.getElementById('weekly-tbody');
   const tfoot = document.getElementById('weekly-tfoot');
+  tbody.innerHTML = '<tr><td colspan="7" class="weekly-empty">読み込み中...</td></tr>';
+  tfoot.innerHTML = '';
+  showLoading(true);
 
-  if (!App.monthData.length) {
-    tbody.innerHTML = '<tr><td colspan="7" class="weekly-empty">データなし</td></tr>';
-    tfoot.innerHTML = '';
-    return;
-  }
+  try {
+    // 対象月の1日と末日
+    const firstOfMonth = new Date(App.year, App.month - 1, 1);
+    const lastOfMonth  = new Date(App.year, App.month, 0);
 
-  const weeks = calcWeeks();
-  let grandSeisan = 0, grandBc = 0, grandDoji = 0, grandDays = 0;
-  const rows = [];
+    // その週の月曜（前月にはみ出す場合あり）
+    const firstDow     = firstOfMonth.getDay();
+    const daysToMon    = firstDow === 0 ? 6 : firstDow - 1;
+    const weekStart    = new Date(firstOfMonth);
+    weekStart.setDate(firstOfMonth.getDate() - daysToMon);
 
-  weeks.forEach((week, i) => {
-    if (!week.days.length) return; // データがない週はスキップ
+    // その週の土曜（翌月にはみ出す場合あり）
+    const lastDow      = lastOfMonth.getDay();
+    const daysToSat    = lastDow === 0 ? 6 : (lastDow === 6 ? 0 : 6 - lastDow);
+    const weekEnd      = new Date(lastOfMonth);
+    weekEnd.setDate(lastOfMonth.getDate() + daysToSat);
 
-    let wSeisan = 0, wBc = 0, wDoji = 0;
-    for (const d of week.days) {
-      wSeisan += d.seisan || 0;
-      wBc     += d.bc     || 0;
-      wDoji   += d.doji   || 0;
+    // 必要な年月セットを収集
+    const ymSet = new Set();
+    ymSet.add(fmtYearMonth(App.year, App.month));
+    if (weekStart < firstOfMonth)
+      ymSet.add(fmtYearMonth(weekStart.getFullYear(), weekStart.getMonth() + 1));
+    if (weekEnd > lastOfMonth)
+      ymSet.add(fmtYearMonth(weekEnd.getFullYear(), weekEnd.getMonth() + 1));
+
+    // 必要な月のデータを全取得
+    const allData = [];
+    for (const ym of ymSet) {
+      const snap = await db.collection('entries').where('yearMonth', '==', ym).get();
+      snap.docs.forEach(d => allData.push(d.data()));
     }
-    grandSeisan += wSeisan; grandBc += wBc; grandDoji += wDoji;
-    grandDays   += week.days.length;
+    allData.sort((a, b) => a.isoDate.localeCompare(b.isoDate));
 
-    const wBcPct   = wSeisan > 0 ? r2(wBc   / wSeisan * 100) : 0;
-    const wDojiPct = wSeisan > 0 ? r2(wDoji / wSeisan * 100) : 0;
+    // weekStart〜weekEnd の範囲でデータをマップ化
+    const dataMap = {};
+    for (const d of allData) dataMap[d.isoDate] = d;
 
-    // 期間ラベル（M/D〜M/D）
-    const firstDay = week.days[0].isoDate;
-    const lastDay  = week.days[week.days.length - 1].isoDate;
-    const fParts   = firstDay.split('-');
-    const lParts   = lastDay.split('-');
-    const label    = `第${i+1}週\n${parseInt(fParts[1])}/${parseInt(fParts[2])}〜${parseInt(lParts[1])}/${parseInt(lParts[2])}`;
+    // 週ごとにグループ化（月〜土、日曜スキップ）
+    const weeks = [];
+    let cur = new Date(weekStart);
+    let weekNum = 0;
 
-    rows.push(`
+    while (cur <= weekEnd) {
+      // 月曜で新しい週を開始
+      if (cur.getDay() === 1) {
+        weekNum++;
+        const sat = new Date(cur);
+        sat.setDate(cur.getDate() + 5);
+        weeks.push({
+          num:   weekNum,
+          start: formatISO(cur),
+          end:   formatISO(sat > weekEnd ? weekEnd : sat),
+          days:  [],
+        });
+      }
+
+      const dow = cur.getDay();
+      // 日曜スキップ
+      if (dow !== 0) {
+        const iso = formatISO(cur);
+        const d   = dataMap[iso];
+        if (d && d.seisan > 0) {
+          weeks[weeks.length - 1].days.push(d);
+        }
+      }
+      cur.setDate(cur.getDate() + 1);
+    }
+
+    // 月内に含まれるデータのみ月計に集計（表示は全週）
+    let grandSeisan = 0, grandBc = 0, grandDoji = 0, grandDays = 0;
+    const currentYM = fmtYearMonth(App.year, App.month);
+    const rows = [];
+
+    weeks.forEach(week => {
+      if (!week.days.length) return;
+
+      let wSeisan = 0, wBc = 0, wDoji = 0;
+      for (const d of week.days) {
+        wSeisan += d.seisan || 0;
+        wBc     += d.bc     || 0;
+        wDoji   += d.doji   || 0;
+        // 月計は対象月のデータのみ
+        if (d.yearMonth === currentYM) {
+          grandSeisan += d.seisan || 0;
+          grandBc     += d.bc     || 0;
+          grandDoji   += d.doji   || 0;
+          grandDays++;
+        }
+      }
+
+      const wBcPct   = wSeisan > 0 ? r2(wBc   / wSeisan * 100) : 0;
+      const wDojiPct = wSeisan > 0 ? r2(wDoji / wSeisan * 100) : 0;
+
+      // 期間ラベル（月跨ぎも M/D 形式で表示）
+      const sp = week.start.split('-');
+      const ep = week.end.split('-');
+      const startLabel = parseInt(sp[1]) + '/' + parseInt(sp[2]);
+      const endLabel   = parseInt(ep[1]) + '/' + parseInt(ep[2]);
+
+      // 月外の日がある週は「※前月含む」「※翌月含む」を表示
+      const hasPrev = week.days.some(d => d.yearMonth !== currentYM && d.isoDate < week.start.slice(0,7) + '-32');
+      const hasNext = week.days.some(d => d.yearMonth !== currentYM);
+      let note = '';
+      if (week.days.some(d => d.yearMonth !== currentYM)) {
+        const prevDays = week.days.filter(d => d.isoDate < App.year + '-' + String(App.month).padStart(2,'0') + '-01');
+        const nextDays = week.days.filter(d => d.isoDate > App.year + '-' + String(App.month).padStart(2,'0') + '-31');
+        if (prevDays.length) note += '<br><span class="week-note">前月含む</span>';
+        if (nextDays.length) note += '<br><span class="week-note">翌月含む</span>';
+      }
+
+      rows.push(`
+        <tr>
+          <td>第${week.num}週<br><small>${startLabel}〜${endLabel}</small>${note}</td>
+          <td>${week.days.length}日</td>
+          <td>${r2(wSeisan).toFixed(1)}</td>
+          <td>${r2(wBc).toFixed(1)}</td>
+          <td>${wBcPct.toFixed(2)}%</td>
+          <td>${r2(wDoji).toFixed(1)}</td>
+          <td>${wDojiPct.toFixed(2)}%</td>
+        </tr>`);
+    });
+
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="7" class="weekly-empty">データなし</td></tr>';
+      tfoot.innerHTML = '';
+      return;
+    }
+
+    const gBcPct   = grandSeisan > 0 ? r2(grandBc   / grandSeisan * 100) : 0;
+    const gDojiPct = grandSeisan > 0 ? r2(grandDoji / grandSeisan * 100) : 0;
+
+    tbody.innerHTML = rows.join('');
+    tfoot.innerHTML = `
       <tr>
-        <td style="white-space:pre-line">${label}</td>
-        <td>${week.days.length}日</td>
-        <td>${r2(wSeisan).toFixed(1)}</td>
-        <td>${r2(wBc).toFixed(1)}</td>
-        <td>${wBcPct.toFixed(2)}%</td>
-        <td>${r2(wDoji).toFixed(1)}</td>
-        <td>${wDojiPct.toFixed(2)}%</td>
-      </tr>`);
-  });
+        <td>月計</td>
+        <td>${grandDays}日</td>
+        <td>${r2(grandSeisan).toFixed(1)}</td>
+        <td>${r2(grandBc).toFixed(1)}</td>
+        <td>${gBcPct.toFixed(2)}%</td>
+        <td>${r2(grandDoji).toFixed(1)}</td>
+        <td>${gDojiPct.toFixed(2)}%</td>
+      </tr>`;
 
-  if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="7" class="weekly-empty">データなし</td></tr>';
-    tfoot.innerHTML = '';
-    return;
+  } catch (err) {
+    console.error('loadAndRenderWeekly:', err);
+    tbody.innerHTML = '<tr><td colspan="7" class="weekly-empty">読み込みエラー</td></tr>';
+  } finally {
+    showLoading(false);
   }
+}
 
-  const gBcPct   = grandSeisan > 0 ? r2(grandBc   / grandSeisan * 100) : 0;
-  const gDojiPct = grandSeisan > 0 ? r2(grandDoji / grandSeisan * 100) : 0;
-
-  tbody.innerHTML = rows.join('');
-  tfoot.innerHTML = `
-    <tr>
-      <td>月計</td>
-      <td>${grandDays}日</td>
-      <td>${r2(grandSeisan).toFixed(1)}</td>
-      <td>${r2(grandBc).toFixed(1)}</td>
-      <td>${gBcPct.toFixed(2)}%</td>
-      <td>${r2(grandDoji).toFixed(1)}</td>
-      <td>${gDojiPct.toFixed(2)}%</td>
-    </tr>`;
+// 月ナビ（週次画面）
+async function renderWeeklyTable() {
+  document.getElementById('weekly-month-label').textContent =
+    App.year + '年 ' + App.month + '月';
+  await loadAndRenderWeekly();
 }
 
 // ---- 印刷・PDF ----

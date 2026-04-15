@@ -474,6 +474,12 @@ body {
   color: var(--gray-400); margin-top: 2px;
 }
 .btn-full-width { grid-column: 1 / -1; }
+.week-note {
+  display: inline-block; font-size: 0.68rem;
+  background: #e8f0fe; color: var(--primary);
+  border-radius: 4px; padding: 1px 5px;
+  margin-top: 2px; font-weight: 500;
+}
 
 /* ---- ヘルプモーダル ---- */
 .help-dialog {
