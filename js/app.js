@@ -70,6 +70,17 @@ function bindEvents() {
   document.getElementById('btn-today-input').addEventListener('click', () =>
     openInputScreen(formatISO(new Date())));
   document.getElementById('btn-view-graph').addEventListener('click', openGraphScreen);
+  document.getElementById('btn-view-weekly').addEventListener('click', openWeeklyScreen);
+
+  // 週次集計画面
+  document.getElementById('btn-back-from-weekly').addEventListener('click', () =>
+    showScreen('screen-home'));
+  document.getElementById('btn-weekly-prev-month').addEventListener('click', () => {
+    changeMonth(-1); renderWeeklyTable();
+  });
+  document.getElementById('btn-weekly-next-month').addEventListener('click', () => {
+    changeMonth(+1); renderWeeklyTable();
+  });
 
   // 入力画面
   document.getElementById('btn-back-from-input').addEventListener('click', () => {
@@ -495,6 +506,126 @@ function renderMainChart() {
       },
     },
   });
+}
+
+// ---- 週次集計 ----
+function openWeeklyScreen() {
+  showScreen('screen-weekly');
+  document.getElementById('weekly-month-label').textContent =
+    App.year + '年 ' + App.month + '月';
+  renderWeeklyTable();
+}
+
+function calcWeeks() {
+  // その月の全日付を生成し、月〜土でグループ化
+  const daysInMonth = new Date(App.year, App.month, 0).getDate();
+  const dataMap = {};
+  for (const d of App.monthData) dataMap[d.isoDate] = d;
+
+  const weeks = [];
+  let weekIdx = -1;
+  let prevMonday = null;
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const iso  = App.year + '-' + String(App.month).padStart(2,'0') + '-' + String(day).padStart(2,'0');
+    const date = new Date(iso + 'T12:00:00');
+    const dow  = date.getDay(); // 0=日,1=月,...,6=土
+
+    // 月曜日（または月初）で新しい週を開始
+    if (dow === 1 || (day === 1 && dow !== 0)) {
+      weeks.push({ monday: iso, saturday: null, days: [] });
+      weekIdx = weeks.length - 1;
+    }
+
+    // 日曜はスキップ（集計対象外）
+    if (dow === 0) continue;
+
+    // 土曜日なら週末を記録
+    if (dow === 6 && weekIdx >= 0) {
+      weeks[weekIdx].saturday = iso;
+    }
+
+    // データがある日だけ追加
+    if (dataMap[iso] && dataMap[iso].seisan > 0) {
+      if (weekIdx < 0) { weeks.push({ monday: iso, saturday: null, days: [] }); weekIdx = 0; }
+      weeks[weekIdx].days.push(dataMap[iso]);
+    }
+  }
+
+  return weeks;
+}
+
+function renderWeeklyTable() {
+  document.getElementById('weekly-month-label').textContent =
+    App.year + '年 ' + App.month + '月';
+
+  const tbody = document.getElementById('weekly-tbody');
+  const tfoot = document.getElementById('weekly-tfoot');
+
+  if (!App.monthData.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="weekly-empty">データなし</td></tr>';
+    tfoot.innerHTML = '';
+    return;
+  }
+
+  const weeks = calcWeeks();
+  let grandSeisan = 0, grandBc = 0, grandDoji = 0, grandDays = 0;
+  const rows = [];
+
+  weeks.forEach((week, i) => {
+    if (!week.days.length) return; // データがない週はスキップ
+
+    let wSeisan = 0, wBc = 0, wDoji = 0;
+    for (const d of week.days) {
+      wSeisan += d.seisan || 0;
+      wBc     += d.bc     || 0;
+      wDoji   += d.doji   || 0;
+    }
+    grandSeisan += wSeisan; grandBc += wBc; grandDoji += wDoji;
+    grandDays   += week.days.length;
+
+    const wBcPct   = wSeisan > 0 ? r2(wBc   / wSeisan * 100) : 0;
+    const wDojiPct = wSeisan > 0 ? r2(wDoji / wSeisan * 100) : 0;
+
+    // 期間ラベル（M/D〜M/D）
+    const firstDay = week.days[0].isoDate;
+    const lastDay  = week.days[week.days.length - 1].isoDate;
+    const fParts   = firstDay.split('-');
+    const lParts   = lastDay.split('-');
+    const label    = `第${i+1}週\n${parseInt(fParts[1])}/${parseInt(fParts[2])}〜${parseInt(lParts[1])}/${parseInt(lParts[2])}`;
+
+    rows.push(`
+      <tr>
+        <td style="white-space:pre-line">${label}</td>
+        <td>${week.days.length}日</td>
+        <td>${r2(wSeisan).toFixed(1)}</td>
+        <td>${r2(wBc).toFixed(1)}</td>
+        <td>${wBcPct.toFixed(2)}%</td>
+        <td>${r2(wDoji).toFixed(1)}</td>
+        <td>${wDojiPct.toFixed(2)}%</td>
+      </tr>`);
+  });
+
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="weekly-empty">データなし</td></tr>';
+    tfoot.innerHTML = '';
+    return;
+  }
+
+  const gBcPct   = grandSeisan > 0 ? r2(grandBc   / grandSeisan * 100) : 0;
+  const gDojiPct = grandSeisan > 0 ? r2(grandDoji / grandSeisan * 100) : 0;
+
+  tbody.innerHTML = rows.join('');
+  tfoot.innerHTML = `
+    <tr>
+      <td>月計</td>
+      <td>${grandDays}日</td>
+      <td>${r2(grandSeisan).toFixed(1)}</td>
+      <td>${r2(grandBc).toFixed(1)}</td>
+      <td>${gBcPct.toFixed(2)}%</td>
+      <td>${r2(grandDoji).toFixed(1)}</td>
+      <td>${gDojiPct.toFixed(2)}%</td>
+    </tr>`;
 }
 
 // ---- 印刷・PDF ----

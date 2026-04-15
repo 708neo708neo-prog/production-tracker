@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-title" content="生産反数">
   <link rel="apple-touch-icon" href="icon-512.png">
   <link rel="manifest" href="manifest.json">
-  <title>生産反数管理 v1.7</title>
+  <title>生産反数管理 v1.8</title>
   <link rel="stylesheet" href="css/style.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <!-- Firebase -->
@@ -88,6 +88,10 @@
         <span class="btn-icon-lg">📊</span>
         <span>月次グラフ</span>
       </button>
+      <button id="btn-view-weekly" class="btn-action btn-secondary btn-full-width">
+        <span class="btn-icon-lg">📋</span>
+        <span>週次集計</span>
+      </button>
     </div>
 
     <div class="mini-chart card">
@@ -153,6 +157,43 @@
     <div class="input-actions">
       <button id="btn-save" class="btn-save">保存</button>
       <button id="btn-delete" class="btn-delete hidden">このデータを削除</button>
+    </div>
+  </main>
+</div>
+
+<!-- ===== 週次集計画面 ===== -->
+<div id="screen-weekly" class="screen hidden">
+  <header class="app-header">
+    <button id="btn-back-from-weekly" class="btn-back">&#8249; 戻る</button>
+    <div class="header-title" id="weekly-header-title">週次集計</div>
+    <div style="width:60px;"></div>
+  </header>
+
+  <main class="weekly-main">
+    <div class="month-nav card">
+      <button id="btn-weekly-prev-month" class="btn-month-nav">&#8249;</button>
+      <div class="month-display" id="weekly-month-label">----年 -月</div>
+      <button id="btn-weekly-next-month" class="btn-month-nav">&#8250;</button>
+    </div>
+
+    <div class="weekly-table-wrap card">
+      <table class="weekly-table" id="weekly-table">
+        <thead>
+          <tr>
+            <th>期間</th>
+            <th>稼働<br>日数</th>
+            <th>生産数<br>合計</th>
+            <th>BC反<br>合計</th>
+            <th>BC反<br>割合</th>
+            <th>胴継反<br>合計</th>
+            <th>胴継反<br>割合</th>
+          </tr>
+        </thead>
+        <tbody id="weekly-tbody">
+          <tr><td colspan="7" class="weekly-empty">読み込み中...</td></tr>
+        </tbody>
+        <tfoot id="weekly-tfoot"></tfoot>
+      </table>
     </div>
   </main>
 </div>
